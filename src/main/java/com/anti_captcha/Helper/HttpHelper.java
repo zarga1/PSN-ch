@@ -60,7 +60,10 @@ public class HttpHelper {
 
         // if "https:" and don't need to check certificates
         if (!request.isValidateTLSCertificates() && request.getUrl().toLowerCase().charAt(4) == 's') {
-            httpClientBuilder = HttpsClientBuilderGiver.INSTANCE.getHttpsClientBuilder();
+            httpClientBuilder = HttpsClientBuilderGiver.INSTANCE.getHttpsClientBuilder(
+            		request.getProxy().get("host"),
+            		Integer.parseInt(request.getProxy().get("port"))
+            		);
         } else {
             httpClientBuilder = HttpClientBuilder.create();
         }
@@ -69,11 +72,11 @@ public class HttpHelper {
             httpClientBuilder.setDefaultCookieStore(cookieStore);
         }
 
-//        if (request.getProxy() != null) {
-//
-//            httpClientBuilder.setRoutePlanner(new DefaultProxyRoutePlanner(
-//                    new HttpHost(request.getProxy().get("host"), Integer.parseInt(request.getProxy().get("port")))));
-//        }
+        if (request.getProxy() != null) {
+
+            httpClientBuilder.setRoutePlanner(new DefaultProxyRoutePlanner(
+                    new HttpHost(request.getProxy().get("host"), Integer.parseInt(request.getProxy().get("port")))));
+        }
 
         HttpClient httpClient;
 
@@ -95,10 +98,10 @@ public class HttpHelper {
 
         HttpClientContext context = HttpClientContext.create();
 
-        HttpHost proxy = new HttpHost("uk971.nordvpn.com", 80);
+        // HttpHost proxy = new HttpHost("uk971.nordvpn.com", 80);
 
         apacheHttpRequest.setConfig(RequestConfig.custom().setConnectionRequestTimeout(request.getTimeout())
-        		.setProxy(proxy)
+        		// .setProxy(proxy)
                 .setConnectTimeout(request.getTimeout()).setSocketTimeout(request.getTimeout()).build());
 
         for (Map.Entry<String, String> header : request.getHeaders().entrySet()) {
@@ -132,7 +135,7 @@ public class HttpHelper {
         /**
          * Apache HttpClient which will work well with any (even invalid and expired) HTTPS certificate.
          */
-        public HttpClientBuilder getHttpsClientBuilder() throws NoSuchAlgorithmException, KeyManagementException {
+        public HttpClientBuilder getHttpsClientBuilder(String host, int port) throws NoSuchAlgorithmException, KeyManagementException {
 
             SSLContext sslcontext = SSLContext.getInstance("TLS"); // SSL and TLS - both work
             // SSLContext sslcontext = SSLContextexts.custom().useSSL().build(); // works, too
@@ -144,7 +147,7 @@ public class HttpHelper {
 
             CredentialsProvider credsProvider = new BasicCredentialsProvider();
             credsProvider.setCredentials(
-                    new AuthScope("uk971.nordvpn.com", 80),
+                    new AuthScope(host, port),
                     new UsernamePasswordCredentials("curtishuey@gmail.com", "5nicker5"));
             
             return HttpClients.custom()

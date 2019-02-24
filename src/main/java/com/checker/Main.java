@@ -146,16 +146,19 @@ public class Main {
 		            	String psPlusStr = isPsPlus ? "pssPlus" : "notPsPlus";
 		            	String ps4ActivatedStr = isPs4Activated ? "Ps4_activated" : "Ps4_not_activated";
 		            	String ps4DesactivateAll = isNoDesactivateAvailable ? "DESAC_ALL" : "NO_DESAC_ALL";
-		            	pw.println("<-------------- " 
+		            	String profileDisplay = "<-------------- " 
 		            			+ username + ":" + password + "(" + languageStr + "," + balance + "," +
-		            					psPlusStr + "," + isNoDesactivateAvailable + "," + ps4DesactivateAll + ")" 
-		            			+ "------------------>");
-		            	
-		                 getPurchasedGames(cookies,language,country);
+            					psPlusStr + "," + ps4DesactivateAll + "," + ps4ActivatedStr + ")" 
+            			+ "------------------>";
+		            	pw.println(profileDisplay);
+		            	System.out.println(profileDisplay);
+		                getPurchasedGames(cookies,language,country);
 	                }
 	                else {
-	                	pw.println("<-------------- " + username + ":" + password + " <<<< ERROR >>>>" 
-		            			+ "------------------>");
+	                	String profileDisplay = "<-------------- " + username + ":" + password + " <<<< ERROR >>>>" 
+		            			+ "------------------>";
+		            	pw.println(profileDisplay);
+		            	System.out.println(profileDisplay);
 	                }
 	                retry = false;
 	            }
@@ -286,13 +289,8 @@ public class Main {
         Object[] codeAuthResult = authorizeWithCode(true, cookies, '?', '&', "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?client_id=55950157-ae9d-4b10-b0de-94dbef199f2c&scope=openid%2Ckamaji%3Aprivacy_control%2Ckamaji%3Aactivity_feed_get_feed_privacy%2Ckamaji%3Aactivity_feed_set_feed_privacy&state=eyJ0aGVtZSI6ImxpcXVpZCJ9&redirect_uri=https%3A%2F%2Faccount.sonyentertainmentnetwork.com%2Foauth_security_check&response_type=code&prompt=login&ui=pr&noEVBlock=false");
         cookies = (Map<String, String>) codeAuthResult[0];
         String authorizationCode = (String) codeAuthResult[1];
-//        HttpRequest request = new HttpRequest("https://account.sonyentertainmentnetwork.com/home/index.action?code=" + authorizationCode + "&state=eyJ0aGVtZSI6ImxpcXVpZCJ9&cid=1a7e3d5d-652b-4deb-88f6-075e15651166");
-//		request.setCookies(cookies);
-//		request.setProxy(proxyHost, proxyPort);
 		HttpResponse response;
 	      try {
-//	        response = HttpHelper.download(request);
-//	        cookies = response.getCookies();
 	    	HttpRequest request = new HttpRequest("https://account.sonyentertainmentnetwork.com/liquid/cam/devices/device-list.action?category=psn&displayNavigation=false");
 	  		request.setCookies(cookies);
 	  		request.setProxy(proxyHost, proxyPort);
@@ -405,24 +403,30 @@ public class Main {
 	        					.getJSONObject(j);
 	        		int totalPrice = order.getInt("totalPrice");
 	        		boolean isPSNReduced = false;
-	        		try {
-	        			JSONArray orderItemDiscounts = order.getJSONArray("orderItemDiscounts");
-	        			isPSNReduced = orderItemDiscounts.length() > 0;
-	        		}catch(JSONException e) {}
-	        		if(totalPrice > 0 || isPSNReduced) {
-	        			executor.execute(new Runnable() {
-							@Override
-							public void run() {
-								try {
-									String productName = isAGameProduct(order.getString("skuId"), language, country) ;
-			                    	if(!checkedProductNames.contains(productName) && productName != null) {
-			            	            pw.println(productName);
-			                			checkedProductNames.add(productName);
-			                		}
-								}catch(JSONException e) {}
-							}
-						});
-                    	
+//	        		try {
+//	        			JSONArray orderItemDiscounts = order.getJSONArray("orderItemDiscounts");
+//	        			isPSNReduced = orderItemDiscounts.length() > 0;
+//	        		}catch(JSONException e) {}  
+	        		if(totalPrice > 0) {
+	        			String productName = isAGameProduct(order.getString("skuId"), language, country) ;
+                    	if(!checkedProductNames.contains(productName) && productName != null) {
+            	            pw.println(productName);
+            	            System.out.println(productName);
+                			checkedProductNames.add(productName);
+                		}
+//	        			executor.execute(new Runnable() {
+//							@Override
+//							public void run() {
+//								try {
+//									String productName = isAGameProduct(order.getString("skuId"), language, country) ;
+//			                    	if(!checkedProductNames.contains(productName) && productName != null) {
+//			            	            pw.println(productName);
+//			            	            System.out.println(productName);
+//			                			checkedProductNames.add(productName);
+//			                		}
+//								}catch(JSONException e) {}
+//							}
+//						});
 	        		}
 	        			
 	        	}
@@ -443,7 +447,8 @@ public class Main {
         try {
             response = HttpHelper.download(request);
             JSONObject responseObject = new JSONObject(response.getBody());
-            return responseObject.getInt("currentAmount") + " " + responseObject.getString("currencyCode");
+            double amount = responseObject.getDouble("currentAmount") / 10;
+            return amount + " " + responseObject.getString("currencyCode");
 
         } catch (Exception e) {
             //DebugHelper.out("JSON parse problem: " + e.getMessage(), //DebugHelper.Type.ERROR);
@@ -710,24 +715,71 @@ public class Main {
   			        	.getJSONObject("children")
   			        	.getJSONArray("data")
   			        	.getJSONObject(0);
-  			        	
+          
           String productType = 
         		  mainGameEntitlement
 			        	.getString("type");
           
-         if(productType.compareToIgnoreCase("game") == 0) {
-	            JSONObject atributes = 
-		            entitlementWrapper
+      	String productIdIdTruncated = productId.substring(0, productId.lastIndexOf("-"));
+      	long count = entitlementWrapper.getString("id").chars().filter(ch -> ch =='-').count();
+
+         if(productType.compareToIgnoreCase("game") == 0 && (count == 2 || entitlementWrapper.getString("id").compareToIgnoreCase(productIdIdTruncated) == 0)) {
+        	 
+	            String gameTitle = entitlementWrapper
 			    		.getJSONArray("included")
 			    		.getJSONObject(0)
-			    		.getJSONObject("attributes");
-	            String gameTitle = atributes.getString("name");
+			    		.getJSONObject("attributes")
+			    		.getString("name");
     			return gameTitle;
 	            
          }
       } catch (Exception e) {}
 	return null;
   	
+  }
+  
+  private static void getEntitlements(Map<String, String> cookies, String language, String country) {
+  	
+  	Object[] result = authorize(cookies, "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?response_type=token&prompt=none&client_id=d932d31d-e8fc-4058-bd22-16d474938353&scope=kamaji%3Aget_vu_mylibrary%2Ckamaji%3Aget_recs%2Ckamaji%3Aget_internal_entitlements%2Cgenome%3Agene_get%2Cwallets%3Ainstrument.get&redirect_uri=https%3A%2F%2Fstore.playstation.com%2Fhtml%2FwebIframeRedirect.html%3FrequestId%3D12730db4-0893-41bc-99e3-0b1a6f5906d7");
+  	String authorizationToken = (String) result[0];
+  	
+  	HttpRequest request = new HttpRequest(
+          "https://commerce.api.np.km.playstation.net/commerce/api/v1/users/me/internal_entitlements?start=0&size=450&revision=0&meta_rev=0&fields=meta_rev%2Ccloud_meta%2Creward_meta%2Cgame_meta%2Cdrm_def%2Cdrm_def.content_type");
+
+      request.addHeader("Authorization", "Bearer " + authorizationToken);
+      request.setCookies(cookies);
+      HttpResponse response;
+      try {
+          response = HttpHelper.download(request);
+          JSONObject entitlementsWrapper = new JSONObject(response.getBody());
+          
+          List<String> products = new ArrayList<String>();
+          JSONArray entitlements = entitlementsWrapper.getJSONArray("entitlements");
+          List<String> checkedProductIds = new ArrayList<String>();
+          for (int i=0; i<entitlements.length(); i++) {
+          	JSONObject entitlement = entitlements.getJSONObject(i);
+          	String plateforme = "PS4";
+          	try {
+              	plateforme = 
+              			entitlement
+	                    		.getJSONArray("entitlement_attributes")
+	                    		.getJSONObject(0)
+	                    		.getString("platform_id");
+              	if(plateforme.compareToIgnoreCase("PS4") == 0) {
+              		String productId = entitlement.getString("product_id");
+              		if(!checkedProductIds.contains(productId)) {
+                  		checkedProductIds.add(productId);
+                  		// filterGamesProducts(productId, language, country);
+              		}
+              	}
+          	}catch(JSONException e) { continue; }
+          }
+
+      } catch (Exception e) {
+          DebugHelper.out("JSON parse problem: " + e.getMessage(), DebugHelper.Type.ERROR);
+          return;
+      }
+
   }
     
 }

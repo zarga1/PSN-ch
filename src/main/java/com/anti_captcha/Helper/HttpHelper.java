@@ -148,7 +148,7 @@ public class HttpHelper {
             CredentialsProvider credsProvider = new BasicCredentialsProvider();
             credsProvider.setCredentials(
                     new AuthScope(host, port),
-                    new UsernamePasswordCredentials("curtishuey@gmail.com", "5nicker5"));
+                    new UsernamePasswordCredentials("frausing85@hotmail.com", "hne85jkd"));
             
             return HttpClients.custom()
             		.setDefaultCredentialsProvider(credsProvider)

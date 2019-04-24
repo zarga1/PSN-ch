@@ -61,9 +61,9 @@ public class HttpHelper {
         // if "https:" and don't need to check certificates
         if (!request.isValidateTLSCertificates() && request.getUrl().toLowerCase().charAt(4) == 's') {
             httpClientBuilder = HttpsClientBuilderGiver.INSTANCE.getHttpsClientBuilder(
-            		request.getProxy().get("host"),
-            		Integer.parseInt(request.getProxy().get("port"))
-            		);
+                    request.getProxy()
+                    );
+
         } else {
             httpClientBuilder = HttpClientBuilder.create();
         }
@@ -72,7 +72,7 @@ public class HttpHelper {
             httpClientBuilder.setDefaultCookieStore(cookieStore);
         }
 
-        if (request.getProxy() != null) {
+        if (request.getProxy() != null && request.getProxy().get("host") != null && request.getProxy().get("port") != null) {
 
             httpClientBuilder.setRoutePlanner(new DefaultProxyRoutePlanner(
                     new HttpHost(request.getProxy().get("host"), Integer.parseInt(request.getProxy().get("port")))));
@@ -135,7 +135,7 @@ public class HttpHelper {
         /**
          * Apache HttpClient which will work well with any (even invalid and expired) HTTPS certificate.
          */
-        public HttpClientBuilder getHttpsClientBuilder(String host, int port) throws NoSuchAlgorithmException, KeyManagementException {
+        public HttpClientBuilder getHttpsClientBuilder(Map<String, String> proxy) throws NoSuchAlgorithmException, KeyManagementException {
 
             SSLContext sslcontext = SSLContext.getInstance("TLS"); // SSL and TLS - both work
             // SSLContext sslcontext = SSLContextexts.custom().useSSL().build(); // works, too
@@ -145,13 +145,17 @@ public class HttpHelper {
 
             SSLContext.setDefault(sslcontext);
 
-            CredentialsProvider credsProvider = new BasicCredentialsProvider();
-            credsProvider.setCredentials(
-                    new AuthScope(host, port),
-                    new UsernamePasswordCredentials("frausing85@hotmail.com", "hne85jkd"));
-            
-            return HttpClients.custom()
-            		.setDefaultCredentialsProvider(credsProvider)
+            HttpClientBuilder builder = HttpClients.custom();
+
+            if(proxy != null && proxy.get("host") != null && proxy.get("port") != null && proxy.get("username") != null && proxy.get("password") != null) {
+                CredentialsProvider credsProvider = new BasicCredentialsProvider();
+                credsProvider.setCredentials(
+                        new AuthScope(proxy.get("host"), Integer.parseInt(proxy.get("port"))),
+                        new UsernamePasswordCredentials(proxy.get("username"), proxy.get("password")));
+                builder.setDefaultCredentialsProvider(credsProvider);
+            }
+
+            return builder
                     .setDefaultRequestConfig(RequestConfig.custom().setCookieSpec(CookieSpecs.STANDARD).build())
                     .setSSLSocketFactory(new SSLConnectionSocketFactory(sslcontext, new NoopHostnameVerifier()));
         }

@@ -172,10 +172,12 @@ public class HttpRequest {
         this.validateTLSCertificates = validateTLSCertificates;
     }
 
-    public void setProxy(String proxyHost, Integer proxyPort) {
+    public void setProxy(String proxyHost, String proxyPort, String username, String password) {
         this.proxy = new HashMap<>();
         this.proxy.put("host", proxyHost);
         this.proxy.put("port", String.valueOf(proxyPort));
+        this.proxy.put("username", username);
+        this.proxy.put("password", password);
     }
 
     public void setCookies(Map<String, String> cookies) {
